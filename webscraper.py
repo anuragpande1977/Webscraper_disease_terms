@@ -3,9 +3,26 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from Bio import Entrez
+import xml.etree.ElementTree as ET
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
+import ssl
 
 # BioPython Entrez setup
 Entrez.email = "your-email@example.com"  # Replace with your email for PubMed access
+
+# Custom adapter to ignore SSL verification errors
+class SSLAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        context.check_hostname = False
+        context.verify_mode = ssl.CERT_NONE
+        kwargs['ssl_context'] = context
+        return super(SSLAdapter, self).init_poolmanager(*args, **kwargs)
+
+# Use the custom adapter for HTTPS requests
+session = requests.Session()
+session.mount('https://', SSLAdapter())
 
 # Streamlit UI
 st.title("Disease Term Web Scraper Using BioPython (PubMed)")
@@ -39,14 +56,16 @@ def fetch_mesh_terms(query):
         
         # Fetch the MeSH record details
         fetch_handle = Entrez.efetch(db="mesh", id=mesh_id, retmode="xml")
-        data = Entrez.read(fetch_handle)
+        data = fetch_handle.read()  # Read in binary mode
         fetch_handle.close()
 
+        # Parse the XML data
+        root = ET.fromstring(data.decode("utf-8"))  # Decode binary content to UTF-8
+
         # Extract MeSH terms and synonyms
-        term_list = [data[0]["DescriptorName"][0]]  # Add the primary MeSH term
-        for concept in data[0]["ConceptList"]:
-            for term in concept["TermList"]:
-                term_list.append(term["String"])
+        term_list = [root.find('.//DescriptorName').text]  # Add the primary MeSH term
+        for concept in root.findall('.//Term'):
+            term_list.append(concept.find('String').text)
 
         return term_list
 
@@ -62,10 +81,10 @@ def expand_disease_terms(disease_terms):
         expanded_terms.update(mesh_terms)
     return expanded_terms
 
-# Function to scrape a single page for disease terms
+# Function to scrape a single page for disease terms (disabling SSL verification)
 def scrape_page(url, disease_terms):
     try:
-        response = requests.get(url)
+        response = session.get(url)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Get all the text content on the page
@@ -98,7 +117,7 @@ def scrape_website(base_url, disease_terms, max_depth=2, visited=None):
     
     # Now find all the subpages to scrape
     try:
-        response = requests.get(base_url)
+        response = session.get(base_url)
         soup = BeautifulSoup(response.text, 'html.parser')
         
         # Find all the links on the page
