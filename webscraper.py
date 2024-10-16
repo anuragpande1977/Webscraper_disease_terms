@@ -56,11 +56,11 @@ def fetch_mesh_terms(query):
         
         # Fetch the MeSH record details
         fetch_handle = Entrez.efetch(db="mesh", id=mesh_id, retmode="xml")
-        data = fetch_handle.read()  # Read in binary mode
+        data = fetch_handle.read()  # No need to decode as it's already a string
         fetch_handle.close()
 
         # Parse the XML data
-        root = ET.fromstring(data.decode("utf-8"))  # Decode binary content to UTF-8
+        root = ET.fromstring(data)  # Directly parse the string
 
         # Extract MeSH terms and synonyms
         term_list = [root.find('.//DescriptorName').text]  # Add the primary MeSH term
