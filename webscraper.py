@@ -2,14 +2,13 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-import pymesh
-from pymesh.mesh import Mesh
+from Bio import Entrez
 
-# Initialize the MeSH library
-mesh = Mesh()
+# BioPython Entrez setup
+Entrez.email = "your-email@example.com"  # Replace with your email for PubMed access
 
 # Streamlit UI
-st.title("Disease Term Web Scraper Using MeSH")
+st.title("Disease Term Web Scraper Using BioPython (PubMed)")
 
 # Input for base URL
 base_url = st.text_input('Enter the website URL to scrape:', 'https://www.example.com')
@@ -23,21 +22,44 @@ user_terms = st.text_area("Enter disease terms (comma-separated):", "cancer, dia
 # Parse the user input
 disease_terms = [term.strip() for term in user_terms.split(',')]
 
-# Function to get related MeSH terms
-def get_mesh_terms(disease):
+# Function to fetch MeSH terms from PubMed using BioPython
+def fetch_mesh_terms(query):
     try:
-        term = mesh.get_term(disease)
-        related_terms = term.get_synonyms()
-        return related_terms
-    except Exception as e:
-        st.warning(f"MeSH term not found for {disease}: {e}")
-        return []
+        # Search for MeSH terms related to the query
+        handle = Entrez.esearch(db="mesh", term=query, retmax=1)
+        record = Entrez.read(handle)
+        handle.close()
 
-# Add MeSH terms to the disease list
+        # If no results found, return the original query
+        if not record['IdList']:
+            st.warning(f"No MeSH terms found for '{query}'")
+            return [query]
+
+        mesh_id = record["IdList"][0]
+        
+        # Fetch the MeSH record details
+        fetch_handle = Entrez.efetch(db="mesh", id=mesh_id, retmode="xml")
+        data = Entrez.read(fetch_handle)
+        fetch_handle.close()
+
+        # Extract MeSH terms and synonyms
+        term_list = [data[0]["DescriptorName"][0]]  # Add the primary MeSH term
+        for concept in data[0]["ConceptList"]:
+            for term in concept["TermList"]:
+                term_list.append(term["String"])
+
+        return term_list
+
+    except Exception as e:
+        st.error(f"Error fetching MeSH terms: {e}")
+        return [query]
+
+# Function to expand disease terms with MeSH synonyms
 def expand_disease_terms(disease_terms):
-    expanded_terms = set(disease_terms)
+    expanded_terms = set()
     for term in disease_terms:
-        expanded_terms.update(get_mesh_terms(term))
+        mesh_terms = fetch_mesh_terms(term)
+        expanded_terms.update(mesh_terms)
     return expanded_terms
 
 # Function to scrape a single page for disease terms
@@ -50,7 +72,7 @@ def scrape_page(url, disease_terms):
         page_text = soup.get_text().lower()
         
         # Look for disease terms in the page text
-        found_terms = {term for term in disease_terms if term.lower() in page_text}
+        found_terms = {term.lower() for term in disease_terms if term.lower() in page_text}
         
         return found_terms
     except Exception as e:
@@ -97,9 +119,9 @@ def scrape_website(base_url, disease_terms, max_depth=2, visited=None):
 # Run the scraper when the button is pressed
 if st.button('Start Scraping'):
     if base_url and disease_terms:
-        # Expand disease terms using MeSH
+        # Expand disease terms using BioPython (MeSH)
         expanded_disease_terms = expand_disease_terms(disease_terms)
-        st.write(f"Expanded Disease Terms: {expanded_disease_terms}")
+        st.write(f"Expanded Disease Terms (with MeSH): {expanded_disease_terms}")
         
         # Scrape the website
         found_disease_terms = scrape_website(base_url, expanded_disease_terms, max_depth=max_depth)
